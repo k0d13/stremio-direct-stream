@@ -8,7 +8,7 @@ WORKDIR /app
 # pins via `packageManager` (ours, and the provider's own).
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN apk add --no-cache git && corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml ./
 # Full install so the git dep builds with its devDependencies, then prune dev
 # deps so only production deps carry to the runtime image.
 RUN pnpm install --frozen-lockfile && pnpm prune --prod
