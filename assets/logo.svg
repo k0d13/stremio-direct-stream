@@ -1,0 +1,9 @@
+<!-- Static export of the brand badge for the README (GitHub won't render data
+     URIs). Keep in sync with src/logo.ts, the single source of truth. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="58" fill="#12100c"/>
+  <rect x="52" y="120" width="44" height="16" rx="8" fill="#ff4d00"/>
+  <rect x="70" y="94" width="26" height="16" rx="8" fill="#ff4d00" opacity="0.55"/>
+  <rect x="70" y="146" width="26" height="16" rx="8" fill="#ff4d00" opacity="0.55"/>
+  <path d="M124 90 L194 128 L124 166 z" fill="#ff4d00" stroke="#ff4d00" stroke-width="26" stroke-linejoin="round"/>
+</svg>

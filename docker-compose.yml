@@ -1,0 +1,18 @@
+services:
+  addon:
+    image: ghcr.io/k0d13/stremio-direct-stream:latest
+    restart: unless-stopped
+    environment:
+      # Set in your .env file, or in Portainer's environment variables section.
+      TMDB_API_KEY: ${TMDB_API_KEY}
+    ports:
+      # host:container — change the left side to serve on a different host port.
+      - "7000:7000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:7000/manifest.json || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

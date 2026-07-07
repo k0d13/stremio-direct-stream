@@ -1,0 +1,12 @@
+node_modules
+.git
+.github
+.env
+.dev.vars
+.wrangler
+.vercel
+*.log
+Dockerfile
+docker-compose.yml
+.dockerignore
+README.md

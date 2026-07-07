@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/wrangler@4.107.0/config-schema.json",
+  "name": "stremio-direct-stream",
+  "main": "api/index.ts",
+  // 2025-04-01+ auto-populates process.env from vars/secrets under nodejs_compat.
+  "compatibility_date": "2025-04-01",
+  // nodejs_compat is required so @p-stream/providers' `form-data` import resolves.
+  "compatibility_flags": ["nodejs_compat"]
+}
