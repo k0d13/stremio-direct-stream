@@ -1,6 +1,8 @@
 import { createRouter } from "@stremio-addon/sdk";
 import { addonInterface } from "../src/addon.js";
 import { landingPage } from "../src/landing.js";
+import { requestContext } from "../src/context.js";
+import { clientIpFromRequest } from "../src/ip.js";
 
 const router = createRouter(addonInterface);
 
@@ -17,12 +19,18 @@ async function route(request: Request, pathname: string): Promise<Response> {
 }
 
 /** Web-standard request handler shared by every runtime (Bun, Vercel, Workers). */
-export async function handleRequest(request: Request): Promise<Response> {
+export async function handleRequest(
+  request: Request,
+  server?: { requestIP?: (req: Request) => { address: string } | null },
+): Promise<Response> {
   const started = Date.now();
   const { pathname } = new URL(request.url);
+  const clientIp = clientIpFromRequest(request, server);
 
   try {
-    const response = await route(request, pathname);
+    const response = await requestContext.run({ clientIp }, () =>
+      route(request, pathname),
+    );
     const ms = Date.now() - started;
     console.log(`[http] ${request.method} ${pathname} -> ${response.status} (${ms}ms)`);
     return response;
