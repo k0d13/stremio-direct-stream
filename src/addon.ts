@@ -5,7 +5,7 @@ import { LOGO_DATA_URI } from "./logo.js";
 
 const manifest: Manifest = {
   id: "community.directstream",
-  version: "0.0.1",
+  version: "0.0.2",
   name: "Direct Stream",
   description: "Direct HTTP streams for movies and series.",
   logo: LOGO_DATA_URI,
