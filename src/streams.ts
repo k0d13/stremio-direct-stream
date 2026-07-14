@@ -3,21 +3,199 @@ import { Parser } from "m3u8-parser";
 import type { Stream } from "@stremio-addon/sdk";
 import { providers } from "./providers.js";
 
+/**
+ * How long we'll wait to find *any* working source. If nothing has succeeded by
+ * now we give up and return empty.
+ */
+const DISCOVERY_MS = 30_000;
+/**
+ * Once we have at least one source, how long we keep collecting more before
+ * returning. The timer resets on each new source, so a steady trickle keeps
+ * gathering while a lone hit returns soon after — this is what stops us idling
+ * on slow/hung sources once we already have something.
+ */
+const SETTLE_MS = 6_000;
+/** How many sources to scrape at once. */
+const CONCURRENCY = 6;
+
 export async function getStreams(media: ScrapeMedia): Promise<Stream[]> {
-  const result = await providers.runAll({ media });
-  if (!result) {
-    console.warn(`[streams] no provider produced a stream for "${media.title}"`);
-    return [];
+  return runMultiSource(media);
+}
+
+/**
+ * Build the single top-quality Stremio entry for one source. For HLS this
+ * fetches and parses the m3u8, so we start it as soon as a source lands (rather
+ * than after scraping finishes) to overlap it with the settle window. Resilient:
+ * a bad playlist yields undefined instead of failing the whole request.
+ */
+async function topStream(result: RunOutput): Promise<Stream | undefined> {
+  try {
+    const provider = providerName(result);
+    const perSource =
+      result.stream.type === "file"
+        ? fileStreams(result, provider)
+        : await hlsStreams(result, provider);
+    return perSource[0];
+  } catch {
+    return undefined;
   }
+}
 
-  // Resolve the source/embed id (e.g. "vidlink") to its pretty name ("Vidlink").
+/** Resolve a result's source/embed id (e.g. "vidlink") to its name ("Vidlink"). */
+function providerName(result: RunOutput): string {
   const id = result.embedId ?? result.sourceId;
-  const provider = providers.getMetadata(id)?.name ?? id;
-  console.log(`[streams] "${media.title}" matched ${provider} (${result.stream.type})`);
+  const name = providers.getMetadata(id)?.name ?? id;
+  // Some provider names ship with decorative emoji (e.g. "🔥 Showbox") — strip
+  // any emoji/symbols and tidy the leftover whitespace.
+  return name
+    .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  return result.stream.type === "file"
-    ? fileStreams(result, provider)
-    : await hlsStreams(result, provider);
+/** `[streams]`-prefixed logger with a millisecond stopwatch for run summaries. */
+function makeLog(media: ScrapeMedia) {
+  const start = Date.now();
+  const elapsed = () => `${((Date.now() - start) / 1000).toFixed(1)}s`;
+  const title = `"${media.title}" (${media.type})`;
+  return {
+    elapsed,
+    start: (n: number) =>
+      console.log(`[streams] ${title}: scraping ${n} sources`),
+    hit: (result: RunOutput, n: number) =>
+      console.log(
+        `[streams] ${title}: ${providerName(result)} ${result.stream.type} ` +
+          `[${n}] (${elapsed()})`,
+      ),
+    done: (results: RunOutput[], reason: string) => {
+      if (results.length === 0) {
+        console.warn(
+          `[streams] ${title}: no working source after ${elapsed()} (${reason})`,
+        );
+        return;
+      }
+      const names = results.map(providerName).join(", ");
+      console.log(
+        `[streams] ${title}: ${results.length} source(s) in ${elapsed()} ` +
+          `(${reason}) — ${names}`,
+      );
+    },
+  };
+}
+
+/**
+ * Scrape sources concurrently and collect the first working ones. `runAll`
+ * only ever returns a single source's streams, and the top-ranked source is
+ * frequently dead — so instead we gather every source that lands within the
+ * settle window and surface one quality from each, giving Stremio fallbacks.
+ */
+async function runMultiSource(media: ScrapeMedia): Promise<Stream[]> {
+  const log = makeLog(media);
+  const sources = providers
+    .listSources()
+    .filter((s) => s.mediaTypes?.includes(media.type) ?? true)
+    .sort((a, b) => b.rank - a.rank);
+  log.start(sources.length);
+
+  const results: RunOutput[] = [];
+  // Stream-building (incl. the HLS m3u8 fetch) kicked off per source as it
+  // lands, so it runs concurrently during the settle window instead of after.
+  const building: Promise<Stream | undefined>[] = [];
+
+  return new Promise<Stream[]>((resolve) => {
+    let done = false;
+    let index = 0;
+    let active = 0;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+
+    // Why the run ended — surfaced in the summary log.
+    const finish = async (reason: string) => {
+      if (done) return;
+      done = true;
+      clearTimeout(discoveryTimer);
+      clearTimeout(settleTimer);
+      log.done(results, reason);
+      const streams = await Promise.all(building);
+      resolve(streams.filter((s): s is Stream => s !== undefined));
+    };
+
+    const check = () => {
+      // Ran out of sources with nothing (more) to wait on.
+      if (index >= sources.length && active === 0) return finish("exhausted");
+    };
+
+    const onResult = (out: RunOutput | null) => {
+      if (done || !out) return;
+      results.push(out);
+      building.push(topStream(out));
+      log.hit(out, results.length);
+      // (Re)start the settle window: once we have something, we only wait a
+      // little longer for stragglers rather than the full discovery timeout.
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => finish("settle window"), SETTLE_MS);
+    };
+
+    // Backstop: if nothing succeeds at all, give up after the discovery window.
+    const discoveryTimer = setTimeout(() => finish("timed out"), DISCOVERY_MS);
+
+    const launchNext = () => {
+      if (done || index >= sources.length) {
+        check();
+        return;
+      }
+      const source = sources[index++]!;
+      active++;
+      resolveSource(media, source.id)
+        .then(onResult)
+        .finally(() => {
+          active--;
+          check();
+          launchNext();
+        });
+    };
+
+    if (sources.length === 0) return finish("no sources");
+    for (let i = 0; i < Math.min(CONCURRENCY, sources.length); i++) {
+      launchNext();
+    }
+  });
+}
+
+/**
+ * Resolve a single source to one working stream, mirroring `runAll`'s per-source
+ * logic: take a direct stream if the source produced one, otherwise walk its
+ * embeds until one yields a playable stream. Returns null if the source is dead.
+ */
+async function resolveSource(
+  media: ScrapeMedia,
+  id: string,
+): Promise<RunOutput | null> {
+  try {
+    const output = await providers.runSourceScraper({ media, id });
+    if (output.stream?.[0]) {
+      return { sourceId: id, stream: output.stream[0] };
+    }
+    for (const embed of output.embeds) {
+      try {
+        const embedOutput = await providers.runEmbedScraper({
+          url: embed.url,
+          id: embed.embedId,
+        });
+        if (embedOutput.stream[0]) {
+          return {
+            sourceId: id,
+            embedId: embed.embedId,
+            stream: embedOutput.stream[0],
+          };
+        }
+      } catch {
+        // Embed failed — try the next one.
+      }
+    }
+  } catch {
+    // Source failed entirely — treat as dead.
+  }
+  return null;
 }
 
 /** One Stremio entry per quality in a direct-file (mp4) stream. */

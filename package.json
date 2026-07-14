@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@p-stream/providers": "github:xp-technologies-dev/providers#0cec62538f1aee5bb785b89f26ca76bac87ce796",
+    "@p-stream/providers": "github:steveyout/providers#dc2b763043d3b1f4ebb24e75c3fbf52dd7b76886",
     "@stremio-addon/sdk": "^1.0.0",
     "m3u8-parser": "^7.2.0",
     "moviedb-promise": "^4.0.8"
