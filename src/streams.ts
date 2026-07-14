@@ -1,7 +1,7 @@
 import type { RunOutput, ScrapeMedia } from "@p-stream/providers";
 import { Parser } from "m3u8-parser";
 import type { Stream } from "@stremio-addon/sdk";
-import { providers } from "./providers.js";
+import { providers } from "./providers/index.js";
 
 /**
  * How long we'll wait to find *any* working source. If nothing has succeeded by
