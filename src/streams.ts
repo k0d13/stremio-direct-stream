@@ -3,8 +3,6 @@ import { Parser } from "m3u8-parser";
 import type { Stream } from "@stremio-addon/sdk";
 import { providers } from "./providers.js";
 
-/** Stop once we have this many working sources. */
-const MAX_SOURCES = 3;
 /**
  * How long we'll wait to find *any* working source. If nothing has succeeded by
  * now we give up and return empty.
@@ -13,8 +11,8 @@ const DISCOVERY_MS = 30_000;
 /**
  * Once we have at least one source, how long we keep collecting more before
  * returning. The timer resets on each new source, so a steady trickle keeps
- * gathering (up to MAX_SOURCES) while a lone hit returns soon after — this is
- * what stops us idling on slow/hung sources once we already have something.
+ * gathering while a lone hit returns soon after — this is what stops us idling
+ * on slow/hung sources once we already have something.
  */
 const SETTLE_MS = 6_000;
 /** How many sources to scrape at once. */
@@ -55,7 +53,7 @@ function makeLog(media: ScrapeMedia) {
     hit: (result: RunOutput, n: number) =>
       console.log(
         `[streams] ${title}: ${providerName(result)} ${result.stream.type} ` +
-          `[${n}/${MAX_SOURCES}] (${elapsed()})`,
+          `[${n}] (${elapsed()})`,
       ),
     done: (results: RunOutput[], reason: string) => {
       if (results.length === 0) {
@@ -76,8 +74,8 @@ function makeLog(media: ScrapeMedia) {
 /**
  * Scrape sources concurrently and collect the first working ones. `runAll`
  * only ever returns a single source's streams, and the top-ranked source is
- * frequently dead — so instead we gather up to MAX_SOURCES working sources and
- * surface one quality from each, giving Stremio several fallbacks to try.
+ * frequently dead — so instead we gather every source that lands within the
+ * settle window and surface one quality from each, giving Stremio fallbacks.
  */
 async function runMultiSource(media: ScrapeMedia): Promise<RunOutput[]> {
   const log = makeLog(media);
@@ -101,13 +99,11 @@ async function runMultiSource(media: ScrapeMedia): Promise<RunOutput[]> {
       done = true;
       clearTimeout(discoveryTimer);
       clearTimeout(settleTimer);
-      const out = results.slice(0, MAX_SOURCES);
-      log.done(out, reason);
-      resolve(out);
+      log.done(results, reason);
+      resolve(results);
     };
 
     const check = () => {
-      if (results.length >= MAX_SOURCES) return finish("target reached");
       // Ran out of sources with nothing (more) to wait on.
       if (index >= sources.length && active === 0) return finish("exhausted");
     };
