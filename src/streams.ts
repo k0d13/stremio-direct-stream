@@ -1,7 +1,11 @@
-import type { RunOutput, ScrapeMedia } from "@p-stream/providers";
+import type {
+  ProviderControls,
+  RunOutput,
+  ScrapeMedia,
+} from "@p-stream/providers";
 import { Parser } from "m3u8-parser";
 import type { Stream } from "@stremio-addon/sdk";
-import { providers } from "./providers/index.js";
+import { getProviders } from "./providers/index.js";
 
 /**
  * How long we'll wait to find *any* working source. If nothing has succeeded by
@@ -19,7 +23,9 @@ const SETTLE_MS = 6_000;
 const CONCURRENCY = 6;
 
 export async function getStreams(media: ScrapeMedia): Promise<Stream[]> {
-  return runMultiSource(media);
+  // The set is tailored to this request's network — see getProviders.
+  const providers = await getProviders();
+  return runMultiSource(media, providers);
 }
 
 /**
@@ -28,9 +34,12 @@ export async function getStreams(media: ScrapeMedia): Promise<Stream[]> {
  * than after scraping finishes) to overlap it with the settle window. Resilient:
  * a bad playlist yields undefined instead of failing the whole request.
  */
-async function topStream(result: RunOutput): Promise<Stream | undefined> {
+async function topStream(
+  result: RunOutput,
+  providers: ProviderControls,
+): Promise<Stream | undefined> {
   try {
-    const provider = providerName(result);
+    const provider = providerName(result, providers);
     const perSource =
       result.stream.type === "file"
         ? fileStreams(result, provider)
@@ -42,7 +51,7 @@ async function topStream(result: RunOutput): Promise<Stream | undefined> {
 }
 
 /** Resolve a result's source/embed id (e.g. "vidlink") to its name ("Vidlink"). */
-function providerName(result: RunOutput): string {
+function providerName(result: RunOutput, providers: ProviderControls): string {
   const id = result.embedId ?? result.sourceId;
   const name = providers.getMetadata(id)?.name ?? id;
   // Some provider names ship with decorative emoji (e.g. "🔥 Showbox") — strip
@@ -54,7 +63,7 @@ function providerName(result: RunOutput): string {
 }
 
 /** `[streams]`-prefixed logger with a millisecond stopwatch for run summaries. */
-function makeLog(media: ScrapeMedia) {
+function makeLog(media: ScrapeMedia, providers: ProviderControls) {
   const start = Date.now();
   const elapsed = () => `${((Date.now() - start) / 1000).toFixed(1)}s`;
   const title = `"${media.title}" (${media.type})`;
@@ -64,8 +73,8 @@ function makeLog(media: ScrapeMedia) {
       console.log(`[streams] ${title}: scraping ${n} sources`),
     hit: (result: RunOutput, n: number) =>
       console.log(
-        `[streams] ${title}: ${providerName(result)} ${result.stream.type} ` +
-          `[${n}] (${elapsed()})`,
+        `[streams] ${title}: ${providerName(result, providers)} ` +
+          `${result.stream.type} [${n}] (${elapsed()})`,
       ),
     done: (results: RunOutput[], reason: string) => {
       if (results.length === 0) {
@@ -74,7 +83,7 @@ function makeLog(media: ScrapeMedia) {
         );
         return;
       }
-      const names = results.map(providerName).join(", ");
+      const names = results.map((r) => providerName(r, providers)).join(", ");
       console.log(
         `[streams] ${title}: ${results.length} source(s) in ${elapsed()} ` +
           `(${reason}) — ${names}`,
@@ -89,8 +98,11 @@ function makeLog(media: ScrapeMedia) {
  * frequently dead — so instead we gather every source that lands within the
  * settle window and surface one quality from each, giving Stremio fallbacks.
  */
-async function runMultiSource(media: ScrapeMedia): Promise<Stream[]> {
-  const log = makeLog(media);
+async function runMultiSource(
+  media: ScrapeMedia,
+  providers: ProviderControls,
+): Promise<Stream[]> {
+  const log = makeLog(media, providers);
   const sources = providers
     .listSources()
     .filter((s) => s.mediaTypes?.includes(media.type) ?? true)
@@ -115,8 +127,18 @@ async function runMultiSource(media: ScrapeMedia): Promise<Stream[]> {
       clearTimeout(discoveryTimer);
       clearTimeout(settleTimer);
       log.done(results, reason);
-      const streams = await Promise.all(building);
-      resolve(streams.filter((s): s is Stream => s !== undefined));
+      // building[i] pairs with results[i]; sources land concurrently, so sort
+      // the survivors by their source's rank for a stable, ranked ordering.
+      const built = await Promise.all(building);
+      const ranked = results
+        .map((r, i) => ({
+          stream: built[i],
+          rank: providers.getMetadata(r.sourceId)?.rank ?? 0,
+        }))
+        .filter((x): x is { stream: Stream; rank: number } => !!x.stream)
+        .sort((a, b) => b.rank - a.rank)
+        .map((x) => x.stream);
+      resolve(ranked);
     };
 
     const check = () => {
@@ -127,7 +149,7 @@ async function runMultiSource(media: ScrapeMedia): Promise<Stream[]> {
     const onResult = (out: RunOutput | null) => {
       if (done || !out) return;
       results.push(out);
-      building.push(topStream(out));
+      building.push(topStream(out, providers));
       log.hit(out, results.length);
       // (Re)start the settle window: once we have something, we only wait a
       // little longer for stragglers rather than the full discovery timeout.
@@ -145,7 +167,7 @@ async function runMultiSource(media: ScrapeMedia): Promise<Stream[]> {
       }
       const source = sources[index++]!;
       active++;
-      resolveSource(media, source.id)
+      resolveSource(media, source.id, providers)
         .then(onResult)
         .finally(() => {
           active--;
@@ -169,6 +191,7 @@ async function runMultiSource(media: ScrapeMedia): Promise<Stream[]> {
 async function resolveSource(
   media: ScrapeMedia,
   id: string,
+  providers: ProviderControls,
 ): Promise<RunOutput | null> {
   try {
     const output = await providers.runSourceScraper({ media, id });
