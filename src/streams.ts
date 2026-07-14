@@ -44,7 +44,13 @@ async function topStream(result: RunOutput): Promise<Stream | undefined> {
 /** Resolve a result's source/embed id (e.g. "vidlink") to its name ("Vidlink"). */
 function providerName(result: RunOutput): string {
   const id = result.embedId ?? result.sourceId;
-  return providers.getMetadata(id)?.name ?? id;
+  const name = providers.getMetadata(id)?.name ?? id;
+  // Some provider names ship with decorative emoji (e.g. "🔥 Showbox") — strip
+  // any emoji/symbols and tidy the leftover whitespace.
+  return name
+    .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** `[streams]`-prefixed logger with a millisecond stopwatch for run summaries. */
