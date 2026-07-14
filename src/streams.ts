@@ -19,20 +19,26 @@ const SETTLE_MS = 6_000;
 const CONCURRENCY = 6;
 
 export async function getStreams(media: ScrapeMedia): Promise<Stream[]> {
-  const results = await runMultiSource(media);
-  if (results.length === 0) return [];
+  return runMultiSource(media);
+}
 
-  const streams: Stream[] = [];
-  for (const result of results) {
-    // Only the top quality from each source — one entry per working source.
+/**
+ * Build the single top-quality Stremio entry for one source. For HLS this
+ * fetches and parses the m3u8, so we start it as soon as a source lands (rather
+ * than after scraping finishes) to overlap it with the settle window. Resilient:
+ * a bad playlist yields undefined instead of failing the whole request.
+ */
+async function topStream(result: RunOutput): Promise<Stream | undefined> {
+  try {
     const provider = providerName(result);
     const perSource =
       result.stream.type === "file"
         ? fileStreams(result, provider)
         : await hlsStreams(result, provider);
-    if (perSource[0]) streams.push(perSource[0]);
+    return perSource[0];
+  } catch {
+    return undefined;
   }
-  return streams;
 }
 
 /** Resolve a result's source/embed id (e.g. "vidlink") to its name ("Vidlink"). */
@@ -77,7 +83,7 @@ function makeLog(media: ScrapeMedia) {
  * frequently dead — so instead we gather every source that lands within the
  * settle window and surface one quality from each, giving Stremio fallbacks.
  */
-async function runMultiSource(media: ScrapeMedia): Promise<RunOutput[]> {
+async function runMultiSource(media: ScrapeMedia): Promise<Stream[]> {
   const log = makeLog(media);
   const sources = providers
     .listSources()
@@ -86,21 +92,25 @@ async function runMultiSource(media: ScrapeMedia): Promise<RunOutput[]> {
   log.start(sources.length);
 
   const results: RunOutput[] = [];
+  // Stream-building (incl. the HLS m3u8 fetch) kicked off per source as it
+  // lands, so it runs concurrently during the settle window instead of after.
+  const building: Promise<Stream | undefined>[] = [];
 
-  return new Promise<RunOutput[]>((resolve) => {
+  return new Promise<Stream[]>((resolve) => {
     let done = false;
     let index = 0;
     let active = 0;
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
 
     // Why the run ended — surfaced in the summary log.
-    const finish = (reason: string) => {
+    const finish = async (reason: string) => {
       if (done) return;
       done = true;
       clearTimeout(discoveryTimer);
       clearTimeout(settleTimer);
       log.done(results, reason);
-      resolve(results);
+      const streams = await Promise.all(building);
+      resolve(streams.filter((s): s is Stream => s !== undefined));
     };
 
     const check = () => {
@@ -109,8 +119,9 @@ async function runMultiSource(media: ScrapeMedia): Promise<RunOutput[]> {
     };
 
     const onResult = (out: RunOutput | null) => {
-      if (!out) return;
+      if (done || !out) return;
       results.push(out);
+      building.push(topStream(out));
       log.hit(out, results.length);
       // (Re)start the settle window: once we have something, we only wait a
       // little longer for stragglers rather than the full discovery timeout.
