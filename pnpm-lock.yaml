@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@p-stream/providers':
-        specifier: github:xp-technologies-dev/providers#0cec62538f1aee5bb785b89f26ca76bac87ce796
-        version: https://codeload.github.com/xp-technologies-dev/providers/tar.gz/0cec62538f1aee5bb785b89f26ca76bac87ce796
+        specifier: github:steveyout/providers#dc2b763043d3b1f4ebb24e75c3fbf52dd7b76886
+        version: https://codeload.github.com/steveyout/providers/tar.gz/dc2b763043d3b1f4ebb24e75c3fbf52dd7b76886
       '@stremio-addon/sdk':
         specifier: ^1.0.0
         version: 1.0.0
@@ -40,8 +40,8 @@ packages:
     resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
     engines: {node: '>=6.9.0'}
 
-  '@p-stream/providers@https://codeload.github.com/xp-technologies-dev/providers/tar.gz/0cec62538f1aee5bb785b89f26ca76bac87ce796':
-    resolution: {tarball: https://codeload.github.com/xp-technologies-dev/providers/tar.gz/0cec62538f1aee5bb785b89f26ca76bac87ce796}
+  '@p-stream/providers@https://codeload.github.com/steveyout/providers/tar.gz/dc2b763043d3b1f4ebb24e75c3fbf52dd7b76886':
+    resolution: {tarball: https://codeload.github.com/steveyout/providers/tar.gz/dc2b763043d3b1f4ebb24e75c3fbf52dd7b76886}
     version: 3.2.0
 
   '@standard-schema/spec@1.1.0':
@@ -337,7 +337,7 @@ snapshots:
 
   '@babel/runtime@7.29.7': {}
 
-  '@p-stream/providers@https://codeload.github.com/xp-technologies-dev/providers/tar.gz/0cec62538f1aee5bb785b89f26ca76bac87ce796':
+  '@p-stream/providers@https://codeload.github.com/steveyout/providers/tar.gz/dc2b763043d3b1f4ebb24e75c3fbf52dd7b76886':
     dependencies:
       abort-controller: 3.0.0
       cheerio: 1.0.0-rc.12
